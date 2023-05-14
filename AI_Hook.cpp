@@ -29,6 +29,7 @@ DWORD* const pSeedREP = (DWORD*)0x004D4980;
 #include <iostream>
 #pragma comment(lib,"ws2_32.lib")
 #pragma comment(lib,"winmm.lib")
+
 enum Check:WORD
 {
 	NAK = 0, ACK = 1,  DATA = 2
@@ -164,10 +165,15 @@ bool Init()
 		setting.control_file.open("./control_rep.log", std::ios::out | std::ios::ate);
 	}
 
-	if (setting.port_self == 0 || setting.port_other == 0)
+	if (setting.port_self == 0)
 	{
 		ErrorLog(pSetting, "fail to read ports in net.ini");
 		return false;
+	}
+	if (setting.port_other == 0)
+	{
+		InfoLog(pSetting,"use client/host mode");
+		MessageBoxA(NULL, "currently using the host/client mode, and here is host.","Info",MB_OK);
 	}
 	if (setting.delay_frame < 0)
 		setting.delay_frame = 0;
@@ -271,12 +277,11 @@ void __fastcall M_Init()
 
 int SendKey(Settings* ps, DataToSend data)
 {
-	int l_nLen;
-	if(ps->is_ipv6)
+	int l_nLen=0;
+	if(ps->is_ipv6 && ps->addr_other.sin6_port!=0)
 		l_nLen= sendto(ps->udp_socket, (const char*)&(data), sizeof(DataToSend), 0, (SOCKADDR*)&(ps->addr_other), sizeof(ps->addr_other));
-	else
+	else if(!ps->is_ipv6 && ps->addr_other4.sin_port!=0)
 		l_nLen= sendto(ps->udp_socket, (const char*)&(data), sizeof(DataToSend), 0, (SOCKADDR*)&(ps->addr_other4), sizeof(ps->addr_other4));
-
 	if (l_nLen < 0)
 		ErrorLog(ps, "send error",WSAGetLastError(), false);
 	if (l_nLen > 0 && ps->is_debug)
@@ -295,7 +300,16 @@ int SendKey(Settings* ps, DataToSend data)
 
 int RcvKey(Settings* ps, DataToSend* pData)
 {
-	int l_nReadLen = recvfrom(ps->udp_socket, (char*)(pData), sizeof(DataToSend), 0, nullptr,nullptr);
+	int l_nReadLen = 0;
+	if(ps->port_other!=0)
+		l_nReadLen = recvfrom(ps->udp_socket, (char*)(pData), sizeof(DataToSend), 0, nullptr,nullptr);
+	else{
+		int sz=0;
+		if(ps->is_ipv6)
+			sz = sizeof(ps->addr_other),l_nReadLen = recvfrom(ps->udp_socket, (char*)(pData), sizeof(DataToSend), 0, (SOCKADDR*)&(ps->addr_other), &sz);
+		else
+			sz = sizeof(ps->addr_other4), l_nReadLen = recvfrom(ps->udp_socket, (char*)(pData), sizeof(DataToSend), 0, (SOCKADDR*)&(ps->addr_other4),&sz);
+	}
 
 	if (l_nReadLen > 0 && ps->is_debug)
 	{
@@ -339,6 +353,11 @@ bool CheckNetRcv(Settings* ps)
 
 bool CheckNetSend(Settings* ps)
 {
+	if ((ps->is_ipv6 && ps->addr_other.sin6_port == 0) || (!ps->is_ipv6 && ps->addr_other4.sin_port == 0))
+	{
+			InfoLog(ps, "waiting client to enter");
+			return 1;
+	}
 	Delay(ps, 6);
 	return 0;
 }
